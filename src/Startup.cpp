@@ -14,7 +14,10 @@
 #if defined(_WIN32)
 #elif defined(__linux__)
 #include <unistd.h>
-#endif
+#elif defined (__APPLE__)
+#include <unistd.h>
+#include <libproc.h>
+#endif // __APPLE__
 #include "Http.h"
 #include "Logger.h"
 #include "Network/network.hpp"
@@ -94,6 +97,34 @@ beammp_fs_string GetEP(const beammp_fs_char* P) {
     }();
     return Ret;
 }
+
+beammp_fs_string GetBP(const beammp_fs_char* P) {
+    std::filesystem::path fspath = {};
+#if defined(_WIN32)
+    beammp_fs_char path[256];
+    GetModuleFileNameW(nullptr, path, sizeof(path));
+    fspath = path;
+#elif defined(__linux__)
+    fspath = std::filesystem::canonical("/proc/self/exe");
+#elif defined(__APPLE__)
+    pid_t pid = getpid();
+    char path[PROC_PIDPATHINFO_MAXSIZE];
+    // While this is fine for a raw executable,
+    // an application bundle is read-only and these files
+    // should instead be placed in Application Support.
+    proc_pidpath(pid, path, sizeof(path));
+    fspath = std::string(path);
+ #else
+    fspath = beammp_fs_string(P);
+#endif
+    fspath = std::filesystem::weakly_canonical(fspath.string() + "/..");
+#if defined(_WIN32)
+    return fspath.wstring();
+#else
+    return fspath.string();
+#endif
+}
+
 #if defined(_WIN32)
 void ReLaunch() {
     std::wstring Arg;
@@ -103,7 +134,7 @@ void ReLaunch() {
     }
     info("Relaunch!");
     system("cls");
-    ShellExecuteW(nullptr, L"runas", (GetEP() + GetEN()).c_str(), Arg.c_str(), nullptr, SW_SHOWNORMAL);
+    ShellExecuteW(nullptr, L"runas", (GetBP() + GetEN()).c_str(), Arg.c_str(), nullptr, SW_SHOWNORMAL);
     ShowWindow(GetConsoleWindow(), 0);
     std::this_thread::sleep_for(std::chrono::seconds(1));
     exit(1);
@@ -114,7 +145,7 @@ void URelaunch() {
         Arg += Utils::ToWString(options.argv[c - 1]);
         Arg += L" ";
     }
-    ShellExecuteW(nullptr, L"open", (GetEP() + GetEN()).c_str(), Arg.c_str(), nullptr, SW_SHOWNORMAL);
+    ShellExecuteW(nullptr, L"open", (GetBP() + GetEN()).c_str(), Arg.c_str(), nullptr, SW_SHOWNORMAL);
     ShowWindow(GetConsoleWindow(), 0);
     std::this_thread::sleep_for(std::chrono::seconds(1));
     exit(1);
@@ -128,7 +159,7 @@ void ReLaunch() {
     }
     info("Relaunch!");
     system("clear");
-    int ret = execv(options.executable_name.c_str(), const_cast<char**>(options.argv));
+    int ret = execv((GetBP() + GetEN()).c_str(), const_cast<char**>(options.argv));
     if (ret < 0) {
         error(std::string("execv() failed with: ") + strerror(errno) + ". Failed to relaunch");
         exit(1);
@@ -137,7 +168,7 @@ void ReLaunch() {
     exit(1);
 }
 void URelaunch() {
-    int ret = execv(options.executable_name.c_str(), const_cast<char**>(options.argv));
+    int ret = execv((GetBP() + GetEN()).c_str(), const_cast<char**>(options.argv));
     if (ret < 0) {
         error(std::string("execv() failed with: ") + strerror(errno) + ". Failed to relaunch");
         exit(1);
@@ -169,9 +200,9 @@ void CheckForUpdates(const std::string& CV) {
         "https://backend.beammp.com/version/launcher?branch=" + Branch + "&pk=" + PublicKey);
 
     transform(LatestHash.begin(), LatestHash.end(), LatestHash.begin(), ::tolower);
-    beammp_fs_string EP(GetEP() + GetEN()), Back(GetEP() + beammp_wide("BeamMP-Launcher.back"));
+    beammp_fs_string BP(GetBP() + GetEN()), Back(GetBP() + beammp_wide("BeamMP-Launcher.back"));
 
-    std::string FileHash = Utils::GetSha256HashReallyFast(EP);
+    std::string FileHash = Utils::GetSha256HashReallyFast(BP);
 
     if (FileHash != LatestHash && IsOutdated(Version(VersionStrToInts(GetVer() + GetPatch())), Version(VersionStrToInts(LatestVersion)))) {
         if (!options.no_update) {
@@ -180,13 +211,13 @@ void CheckForUpdates(const std::string& CV) {
             error("Auto update is NOT implemented for the Linux version. Please update manually ASAP as updates contain security patches.");
 #else
             fs::remove(Back);
-            fs::rename(EP, Back);
+            fs::rename(BP, Back);
             info("Downloading Launcher update " + LatestHash);
             HTTP::Download(
                 "https://backend.beammp.com/builds/launcher?download=true"
                 "&pk="
                     + PublicKey + "&branch=" + Branch,
-                EP);
+                BP);
             URelaunch();
 #endif
         } else {

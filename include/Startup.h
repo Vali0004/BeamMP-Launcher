@@ -13,6 +13,7 @@
 
 void InitLauncher();
 beammp_fs_string GetEP(const beammp_fs_char* P = nullptr);
+beammp_fs_string GetBP(const beammp_fs_char* P = nullptr);
 std::filesystem::path GetGamePath();
 std::string GetVer();
 std::string GetPatch();
